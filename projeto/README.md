@@ -1,52 +1,64 @@
-# Painel Epidemiológico de Mortalidade Materna e Violência Obstétrica
+Painel de Mortalidade Materna
 
-Trabalho de Big Data & Analytics, 2ª entrega (base de dados tratada).
-Alunos: Diego Gabriel Pinheiro Damasceno e Flávia Rodrigues Santos Silva. Professora: Sheila Tirony.
+Trabalho de Big Data & Analytics - Fase 2.
 
-Os dados são do Observatório Obstétrico Brasileiro (OOBr), que processa o SIM do Ministério da Saúde e publica as bases no Synapse. Usamos dois dos cinco arquivos (óbitos maternos oficiais e óbitos desconsiderados), de 2014 a 2024.
+Alunos: Diego Gabriel Pinheiro Damasceno e Flávia Rodrigues Santos Silva.
+Professora: Sheila Tirony.
 
-Resultado final:
+Este projeto usa dados do Observatório Obstétrico Brasileiro (OOBr), publicados no Synapse. A base contém óbitos na gravidez e no puerpério, no período de 1996 a 2024.
 
-- `obitos_maternos_oficiais_tratado_2014_2024.csv`: 18.457 linhas, 18.534 óbitos, 17 colunas
-- `obitos_desconsiderados_tratado_2014_2024.csv`: 10.270 linhas, 10.323 óbitos, 15 colunas
+Nesta fase, o foco ficou em mortalidade materna. A violência obstétrica não aparece nos arquivos usados, por isso não foi incluída na base atual.
 
-## Pastas
+O ETL lê os cinco arquivos originais, trata os dados e gera uma base em modelo estrela para PostgreSQL, com dimensões e tabelas fato.
 
-```
-data/raw/         arquivos originais do OOBr (versão 4) e o manifest.csv, sem alteração
-data/processed/   os dois CSVs tratados
-src/etl.py        tratamento dos dados
-src/load.py       carga no PostgreSQL (Aiven)
-sql/schema.sql    criação das tabelas
-sql/consultas_verificacao.sql   consultas usadas para conferir a carga
-docs/DECISOES.md  decisões de tratamento e o motivo de cada uma
-docs/log_etl.txt  contagens geradas pelo etl.py
-```
+Resultado principal do tratamento:
 
-## Como rodar
+Óbitos maternos oficiais: 48.933.
 
-Todos os comandos são rodados dentro da pasta `projeto/`.
+Óbitos desconsiderados: 42.311.
 
-```
+Arquivos tratados: 8 dimensões e 5 tabelas fato em data/processed.
+
+Pastas e arquivos principais:
+
+data/raw: arquivos originais do OOBr e manifest.csv.
+
+data/processed: arquivos tratados gerados pelo ETL.
+
+src/etl.py: script de tratamento dos dados.
+
+src/load.py: script de carga no PostgreSQL.
+
+sql/schema.sql: criação do schema, tabelas, índices e view.
+
+sql/consultas_verificacao.sql: consultas para conferir a carga no banco.
+
+docs/DECISOES.md: decisões técnicas e justificativas.
+
+docs/log_etl.txt: contagens e validações geradas pelo ETL.
+
+Como rodar:
+
+Entre na pasta projeto e instale as dependências:
+
 pip install pandas psycopg2-binary python-dotenv
+
+Depois rode o tratamento:
+
 python src/etl.py
-```
 
-Para a carga, crie um arquivo `.env` com a conexão do Aiven (esse arquivo não deve ir para o GitHub):
+Para carregar no PostgreSQL, crie um arquivo .env com a conexão do Aiven:
 
-```
 DATABASE_URL=postgres://USUARIO:SENHA@HOST:PORTA/defaultdb?sslmode=require
-```
 
-Depois:
+Depois rode:
 
-```
 python src/load.py
-```
 
-O `load.py` apaga e recria as tabelas do schema `painel` antes de carregar. Para conferir, rode `sql/consultas_verificacao.sql` no DBeaver ou no pgAdmin.
+O load.py recria as tabelas do schema painel antes de carregar os CSVs tratados.
 
-## Observações
+Para conferir a carga, rode o arquivo sql/consultas_verificacao.sql no DBeaver ou no pgAdmin.
 
-- 2024 está marcado como `preliminar = true`, porque tem só 745 óbitos oficiais e os arquivos foram atualizados em fevereiro de 2025.
-- A razão de mortalidade materna ainda não dá para calcular, porque precisa dos nascidos vivos do SINASC, que vamos incluir depois.
+Observação:
+
+A razão de mortalidade materna ainda não é calculada nesta base, porque precisa dos dados de nascidos vivos do SINASC.
