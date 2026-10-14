@@ -1,0 +1,24 @@
+[maternos_oficiais] original: 48785 linhas x 15 colunas
+[desconsiderados] original: 42178 linhas x 13 colunas
+[garbage_codes] original: 1554 linhas x 15 colunas
+[analise_cruzada] original: 48933 linhas x 18 colunas
+[ufs] original: 23468 linhas x 13 colunas
+[perfil] estado civil padronizado (variações de gênero): 6 categorias; necropsia nula -> 'Ignorado': 1
+[perfil] linhas idênticas MANTIDAS: 140 (cada linha é um óbito; o total bate com os outros arquivos)
+[validação] óbitos maternos oficiais = 48933 (oficiais = perfil = ufs) -> OK
+[validação] óbitos desconsiderados = 42311 (bate com a soma das colunas 'descons' do arquivo ufs) -> OK
+[qualidade] registros oficiais com idade < 10 anos: 6 (mantidos; ficam na faixa '0 a 9')
+[qualidade] municípios 'ignorados': 21 (um por UF, mantidos)
+[saída] dim_tempo.csv: 29 linhas x 2 colunas
+[saída] dim_localidade.csv: 5154 linhas x 6 colunas
+[saída] dim_faixa_etaria.csv: 10 linhas x 2 colunas
+[saída] dim_raca_cor.csv: 6 linhas x 2 colunas
+[saída] dim_tipo_morte.csv: 3 linhas x 2 colunas
+[saída] dim_periodo_obito.csv: 6 linhas x 2 colunas
+[saída] dim_investigacao_cmm.csv: 3 linhas x 2 colunas
+[saída] dim_causa_cid10.csv: 1253 linhas x 4 colunas
+[saída] fato_obito_materno.csv: 48785 linhas x 10 colunas
+[saída] fato_obito_desconsiderado.csv: 42178 linhas x 9 colunas
+[saída] fato_garbage_code.csv: 1554 linhas x 10 colunas
+[saída] fato_perfil_obito.csv: 48933 linhas x 15 colunas
+[saída] fato_obitos_uf_idade.csv: 23468 linhas x 14 colunas
