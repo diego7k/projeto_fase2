@@ -1,36 +1,45 @@
 SET search_path TO painel;
 
--- 1) Quantidade de linhas por tabela (print para a entrega)
-SELECT 'dim_tempo' AS tabela, COUNT(*) AS linhas FROM dim_tempo
-UNION ALL SELECT 'dim_localidade', COUNT(*) FROM dim_localidade
-UNION ALL SELECT 'dim_faixa_etaria', COUNT(*) FROM dim_faixa_etaria
-UNION ALL SELECT 'dim_raca_cor', COUNT(*) FROM dim_raca_cor
-UNION ALL SELECT 'dim_tipo_morte', COUNT(*) FROM dim_tipo_morte
-UNION ALL SELECT 'dim_periodo_obito', COUNT(*) FROM dim_periodo_obito
-UNION ALL SELECT 'dim_investigacao_cmm', COUNT(*) FROM dim_investigacao_cmm
-UNION ALL SELECT 'dim_causa_cid10', COUNT(*) FROM dim_causa_cid10
-UNION ALL SELECT 'fato_obito_materno', COUNT(*) FROM fato_obito_materno
-UNION ALL SELECT 'fato_obito_desconsiderado', COUNT(*) FROM fato_obito_desconsiderado
-UNION ALL SELECT 'fato_garbage_code', COUNT(*) FROM fato_garbage_code
-UNION ALL SELECT 'fato_perfil_obito', COUNT(*) FROM fato_perfil_obito
-UNION ALL SELECT 'fato_obitos_uf_idade', COUNT(*) FROM fato_obitos_uf_idade;
+-- 1) Linhas e óbitos por tabela
+-- esperado: oficiais 18457 linhas / 18534 óbitos; desconsiderados 10270 linhas / 10323 óbitos
+SELECT 'obitos_maternos_oficiais' AS tabela, COUNT(*) AS linhas, SUM(qtd_obitos) AS obitos
+FROM obitos_maternos_oficiais
+UNION ALL
+SELECT 'obitos_desconsiderados', COUNT(*), SUM(qtd_obitos)
+FROM obitos_desconsiderados;
 
--- 2) Tamanho por tabela e do banco (limite do Aiven Free: 1 GB)
+-- 2) Tamanho das tabelas e do banco (limite de 1 GB no plano gratuito do Aiven)
 SELECT relname AS tabela, pg_size_pretty(pg_total_relation_size(relid)) AS tamanho
 FROM pg_stat_user_tables WHERE schemaname = 'painel'
 ORDER BY pg_total_relation_size(relid) DESC;
+
 SELECT pg_size_pretty(pg_database_size(current_database())) AS tamanho_banco;
 
--- 3) Colunas e tipos (documentar estrutura)
-SELECT table_name, column_name, data_type, character_maximum_length
+-- 3) Colunas e tipos
+SELECT table_name, column_name, data_type, character_maximum_length, is_nullable
 FROM information_schema.columns WHERE table_schema = 'painel'
 ORDER BY table_name, ordinal_position;
 
--- 4) Validação: total de óbitos maternos deve ser 48933 nas três tabelas
-SELECT (SELECT SUM(qtd_obitos) FROM fato_obito_materno)   AS oficiais,
-       (SELECT COUNT(*)        FROM fato_perfil_obito)     AS perfil,
-       (SELECT SUM(obitos_maternos) FROM fato_obitos_uf_idade) AS ufs;
+-- 4) Óbitos por ano nos dois conjuntos (2024 marcado como preliminar)
+SELECT COALESCE(o.ano, d.ano) AS ano, o.obitos AS oficiais, d.obitos AS desconsiderados,
+       COALESCE(o.preliminar, d.preliminar) AS preliminar
+FROM (SELECT ano, preliminar, SUM(qtd_obitos) AS obitos FROM obitos_maternos_oficiais GROUP BY ano, preliminar) o
+FULL JOIN (SELECT ano, preliminar, SUM(qtd_obitos) AS obitos FROM obitos_desconsiderados GROUP BY ano, preliminar) d
+  ON d.ano = o.ano
+ORDER BY ano;
 
--- 5) Exemplo de indicador: óbitos maternos por ano e região
-SELECT ano, regiao, SUM(qtd_obitos) AS obitos
-FROM vw_obito_materno GROUP BY ano, regiao ORDER BY ano, regiao;
+-- 5) Óbitos maternos oficiais por região e faixa etária
+SELECT regiao, faixa_etaria, SUM(qtd_obitos) AS obitos
+FROM obitos_maternos_oficiais
+GROUP BY regiao, faixa_etaria
+ORDER BY regiao, faixa_etaria;
+
+-- 6) Quanto falta de informação (qualidade do registro)
+SELECT 'investigação CMM sem informação' AS item, SUM(qtd_obitos) AS obitos
+FROM obitos_maternos_oficiais WHERE investigacao_cmm = 'Sem informação'
+UNION ALL
+SELECT 'período do óbito não informado', SUM(qtd_obitos)
+FROM obitos_maternos_oficiais WHERE periodo_obito = 'Não informado ou ignorado'
+UNION ALL
+SELECT 'raça/cor ignorada', SUM(qtd_obitos)
+FROM obitos_maternos_oficiais WHERE raca_cor = 'Ignorado';

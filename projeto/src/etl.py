@@ -1,216 +1,155 @@
 """
-ETL - Painel de Mortalidade Materna (fonte: OOBR / Synapse, 1996-2024)
-Lê data/raw/*.csv -> trata -> grava data/processed/*.csv (dimensões e fatos).
-Uso (na raiz do projeto): python src/etl.py
+Tratamento dos óbitos maternos oficiais e dos óbitos desconsiderados (OOBr), 2014 a 2024.
+
+Lê os arquivos originais em data/raw e grava em data/processed:
+    obitos_maternos_oficiais_tratado_2014_2024.csv
+    obitos_desconsiderados_tratado_2014_2024.csv
+
+Rodar a partir da pasta projeto/:  python src/etl.py
 """
-import pandas as pd
+import hashlib
 from pathlib import Path
+
+import pandas as pd
 
 RAW = Path("data/raw")
 OUT = Path("data/processed")
-OUT.mkdir(parents=True, exist_ok=True)
-P = "dados_oobr_obitos_grav_puerp_"
-SUF = "_1996_2024.csv"
-log = []  # registro das decisões/contagens (vai para docs/log_etl.txt)
+ANO_INICIO, ANO_FIM = 2014, 2024
+ANO_PRELIMINAR = 2024  # arquivos atualizados em fev/2025, 2024 ainda está incompleto
+
+log = []
 
 
-def say(msg):
+def registrar(msg):
     print(msg)
     log.append(msg)
 
 
+def arquivo(nome):
+    return RAW / f"dados_oobr_obitos_grav_puerp_{nome}_1996_2024.csv"
+
+
+def conferir_md5():
+    # garante que estamos usando a mesma versão listada no manifest.csv
+    manifest = pd.read_csv(RAW / "manifest.csv")
+    for _, linha in manifest.iterrows():
+        md5 = hashlib.md5((RAW / linha["name"]).read_bytes()).hexdigest()
+        ok = "OK" if md5 == linha["dataFileMD5Hex"] else "DIFERENTE"
+        registrar(f"md5 {linha['name']} (versão {linha['versionNumber']}): {ok}")
+
+
+def conferir_redundancia(oficiais):
+    # motivo de deixar ufs e garbage_codes de fora (ver seção 1.3 do documento)
+    ufs = pd.read_csv(arquivo("ufs"))
+    registrar(f"soma de obitos_maternos no arquivo ufs: {ufs['obitos_maternos'].sum()} "
+              f"(oficiais: {oficiais['obitos'].sum()})")
+    garbage = pd.read_csv(arquivo("garbage_codes"), dtype=str).drop(columns="X")
+    chaves = list(garbage.columns)
+    junto = garbage.merge(oficiais.drop(columns="X").astype(str), on=chaves, how="left", indicator=True)
+    registrar(f"linhas do garbage_codes que não estão nos oficiais: {(junto['_merge'] != 'both').sum()}")
+
+
 def ler(nome):
-    df = pd.read_csv(RAW / f"{P}{nome}{SUF}", dtype=str)
-    say(f"[{nome}] original: {df.shape[0]} linhas x {df.shape[1]} colunas")
-    return df
-
-
-def limpar_texto(df):
-    for c in df.columns:
-        if not pd.api.types.is_numeric_dtype(df[c]):
-            df[c] = df[c].str.strip()
-    return df
-
-
-ESTADO_CIVIL = {
-    "Solteira": "Solteiro(a)", "Solteiro": "Solteiro(a)",
-    "Casada": "Casado(a)", "Casado": "Casado(a)",
-    "Viúva": "Viúvo(a)", "Viúvo": "Viúvo(a)",
-    "Separada Judic./Divorciada": "Separado(a)/Divorciado(a)",
-    "Separado Judic./Divorciado": "Separado(a)/Divorciado(a)",
-}
-
-
-def faixa_etaria(i):
-    if i < 10:
-        return "0 a 9"
-    if i >= 50:
-        return "50 ou mais"
-    base = (i // 5) * 5
-    return f"{base} a {base + 4}"
-
-
-def base_comum(df):
-    """Tipagem e padronização comuns a todos os arquivos."""
-    df = df.drop(columns=["X"], errors="ignore")      # índice do R, sem valor
-    df = limpar_texto(df)
+    df = pd.read_csv(arquivo(nome), dtype=str)
     df["ano"] = df["ano"].astype(int)
     df["idade"] = df["idade"].astype(int)
-    df["uf"] = df["uf"].str.upper()
-    if "codigo" in df:
-        df["codigo"] = df["codigo"].str.zfill(6)
-    if "obitos" in df:
-        df["obitos"] = df["obitos"].astype(int)
-    df["faixa_etaria"] = df["idade"].map(faixa_etaria)
+    df["obitos"] = df["obitos"].astype(int)
+    registrar(f"[{nome}] original: {len(df)} linhas, {df['obitos'].sum()} óbitos")
     return df
 
 
-# ------------------------------------------------------------------ leitura
-oficiais = base_comum(ler("maternos_oficiais"))
-descons = base_comum(ler("desconsiderados"))
-garbage = base_comum(ler("garbage_codes"))
-perfil = base_comum(ler("analise_cruzada"))
-ufs = limpar_texto(ler("ufs").drop(columns=["X"], errors="ignore"))
-
-# ------------------------------------------------------------ tratamentos
-# perfil (1 linha = 1 óbito): padronizar estado civil e preencher nulo
-perfil["est_civil"] = perfil["est_civil"].replace(ESTADO_CIVIL)
-nulos_nec = int(perfil["necropsia"].isna().sum())
-perfil["necropsia"] = perfil["necropsia"].fillna("Ignorado")
-say(f"[perfil] estado civil padronizado (variações de gênero): {perfil['est_civil'].nunique()} categorias; "
-    f"necropsia nula -> 'Ignorado': {nulos_nec}")
-dups = int(perfil.duplicated().sum())
-say(f"[perfil] linhas idênticas MANTIDAS: {dups} (cada linha é um óbito; o total bate com os outros arquivos)")
-
-# ufs: tipos
-for c in ufs.columns:
-    if c not in ("uf", "regiao"):
-        ufs[c] = ufs[c].astype(int)
-ufs["uf"] = ufs["uf"].str.upper()
-# nomes originais passam de 63 caracteres (limite de identificador do PostgreSQL) -> encurtar
-ufs = ufs.rename(columns={
-    "obitos_descons_durante_a_gravidez_parto_ou_aborto_exceto_ext": "obitos_descons_gravidez_exceto_ext",
-    "obitos_descons_durante_o_puerperio_ate_42_dias_exceto_ext": "obitos_descons_puerp_ate42d_exceto_ext",
-    "obitos_descons_durante_o_puerperio_de_43_dias_a_menos_de_1_ano_exceto_ext": "obitos_descons_puerp_43d_1a_exceto_ext",
-    "obitos_descons_periodo_inconsistente_exceto_ext": "obitos_descons_inconsistente_exceto_ext",
-    "obitos_descons_durante_a_gravidez_parto_ou_aborto_ext": "obitos_descons_gravidez_ext",
-    "obitos_descons_durante_o_puerperio_ate_42_dias_ext": "obitos_descons_puerp_ate42d_ext",
-    "obitos_descons_durante_o_puerperio_de_43_dias_a_menos_de_1_ano_ext": "obitos_descons_puerp_43d_1a_ext",
-    "obitos_descons_periodo_inconsistente_ext": "obitos_descons_inconsistente_ext",
-})
-ufs["faixa_etaria"] = ufs["idade"].map(faixa_etaria)
-
-# ---------------------------------------------------------- dimensões
-dim_tempo = pd.DataFrame({"ano": sorted(oficiais["ano"].unique())})
-dim_tempo.insert(0, "id_tempo", range(1, len(dim_tempo) + 1))
-
-loc = pd.concat([oficiais, descons, garbage, perfil])[["codigo", "municipio", "uf", "regiao"]].drop_duplicates()
-loc = loc.sort_values("codigo").reset_index(drop=True)
-loc["municipio_ignorado"] = loc["municipio"].str.contains("ignorado", case=False)
-dim_localidade = loc.rename(columns={"codigo": "codigo_ibge"})
-dim_localidade.insert(0, "id_localidade", range(1, len(dim_localidade) + 1))
+def faixa_etaria(idade):
+    if pd.isna(idade):
+        return "Ignorada"
+    idade = int(idade)
+    if idade >= 50:
+        return "50 ou mais"
+    inicio = idade // 5 * 5
+    return f"{inicio} a {inicio + 4}"
 
 
-def dim_simples(col, nome_id):
-    vals = pd.concat([d[col] for d in (oficiais, descons, garbage, perfil) if col in d]).dropna().unique()
-    d = pd.DataFrame({"descricao": sorted(vals)})
-    d.insert(0, nome_id, range(1, len(d) + 1))
-    return d
+def tratar(df, nome):
+    df = df[df["ano"].between(ANO_INICIO, ANO_FIM)].copy()
+    registrar(f"[{nome}] recorte {ANO_INICIO}-{ANO_FIM}: {len(df)} linhas, {df['obitos'].sum()} óbitos")
 
+    # X é só o número da linha na exportação (e vem NA em 2023 e 2024)
+    df = df.drop(columns="X")
 
-dim_raca_cor = dim_simples("racacor", "id_raca_cor")
-dim_tipo_morte = dim_simples("tipo_de_morte_materna", "id_tipo_morte")
-dim_periodo = dim_simples("periodo_do_obito", "id_periodo")
-dim_investigacao = dim_simples("investigacao_cmm", "id_investigacao")
+    # tira espaços nas pontas e espaços duplicados ("III - Doenças  do sangue")
+    for col in df.columns:
+        if pd.api.types.is_string_dtype(df[col]):
+            df[col] = df[col].str.strip().str.replace(r"\s+", " ", regex=True)
 
-ordem_fx = sorted(oficiais["faixa_etaria"].unique(), key=lambda s: int(s.split()[0]))
-dim_faixa = pd.DataFrame({"id_faixa_etaria": range(1, len(ordem_fx) + 1), "descricao": ordem_fx})
+    # "O15 Eclâmpsia" -> cod_categoria = O15, categoria_descricao = Eclâmpsia
+    partes = df["causabas_categoria"].str.split(" ", n=1)
+    df["cod_categoria"] = partes.str[0]
+    df["categoria_descricao"] = partes.str[1]
 
-# causas: oficiais/garbage trazem o CID de 4 caracteres; desconsiderados só a categoria (3)
-cols_c = ["causabas", "causabas_categoria", "capitulo_cid10"]
-causas = pd.concat([oficiais[cols_c], garbage[cols_c]]).drop_duplicates("causabas")
-causas_d = descons[["causabas_categoria", "capitulo_cid10"]].drop_duplicates("causabas_categoria").copy()
-causas_d["causabas"] = causas_d["causabas_categoria"].str.split().str[0]
-causas = pd.concat([causas, causas_d[cols_c]]).drop_duplicates("causabas").sort_values("causabas")
-dim_causa = causas.reset_index(drop=True)
-dim_causa.insert(0, "id_causa", range(1, len(dim_causa) + 1))
-dim_causa = dim_causa.rename(columns={"causabas": "cid10", "causabas_categoria": "categoria_cid10"})
+    # 99 = idade não informada no SIM
+    registrar(f"[{nome}] idade 99 passou a nula: {(df['idade'] == 99).sum()}")
+    df["idade"] = df["idade"].astype("Int64").mask(df["idade"] == 99)
 
-# mapas texto -> id
-m_tempo = dict(zip(dim_tempo.ano, dim_tempo.id_tempo))
-m_loc = dict(zip(dim_localidade.codigo_ibge, dim_localidade.id_localidade))
-m_raca = dict(zip(dim_raca_cor.descricao, dim_raca_cor.id_raca_cor))
-m_tipo = dict(zip(dim_tipo_morte.descricao, dim_tipo_morte.id_tipo_morte))
-m_per = dict(zip(dim_periodo.descricao, dim_periodo.id_periodo))
-m_inv = dict(zip(dim_investigacao.descricao, dim_investigacao.id_investigacao))
-m_fx = dict(zip(dim_faixa.descricao, dim_faixa.id_faixa_etaria))
-m_causa = dict(zip(dim_causa.cid10, dim_causa.id_causa))
+    df["preliminar"] = df["ano"] == ANO_PRELIMINAR
+    df["faixa_etaria"] = df["idade"].map(faixa_etaria)
 
+    registrar(f"[{nome}] Sem informação na investigação do CMM: "
+              f"{df.loc[df['investigacao_cmm'] == 'Sem informação', 'obitos'].sum()} óbitos")
+    registrar(f"[{nome}] período do óbito não informado: "
+              f"{df.loc[df['periodo_do_obito'] == 'Não informado ou ignorado', 'obitos'].sum()} óbitos")
+    registrar(f"[{nome}] raça/cor ignorada: {df.loc[df['racacor'] == 'Ignorado', 'obitos'].sum()} óbitos")
+    registrar(f"[{nome}] município ignorado: {df['municipio'].str.contains('ignorado', case=False).sum()} linhas")
+    registrar(f"[{nome}] linhas duplicadas: {df.duplicated().sum()}")
 
-def chaves(df):
-    out = pd.DataFrame({
-        "id_tempo": df["ano"].map(m_tempo),
-        "id_localidade": df["codigo"].map(m_loc),
-        "id_faixa_etaria": df["faixa_etaria"].map(m_fx),
-        "id_raca_cor": df["racacor"].map(m_raca),
-        "id_periodo": df["periodo_do_obito"].map(m_per),
-        "id_investigacao": df["investigacao_cmm"].map(m_inv),
-        "idade": df["idade"],
+    return df.rename(columns={
+        "codigo": "cod_municipio",
+        "causabas": "cod_causa",
+        "tipo_de_morte_materna": "tipo_morte_materna",
+        "periodo_do_obito": "periodo_obito",
+        "racacor": "raca_cor",
+        "obitos": "qtd_obitos",
     })
-    if "tipo_de_morte_materna" in df:
-        out["id_tipo_morte"] = df["tipo_de_morte_materna"].map(m_tipo)
-    return out
 
 
-# ----------------------------------------------------------------- fatos
-fato_oficial = chaves(oficiais)
-fato_oficial["id_causa"] = oficiais["causabas"].map(m_causa)
-fato_oficial["qtd_obitos"] = oficiais["obitos"]
+COLUNAS = [
+    "cod_municipio", "municipio", "uf", "regiao", "ano", "preliminar",
+    "cod_causa", "cod_categoria", "categoria_descricao", "capitulo_cid10",
+    "tipo_morte_materna", "periodo_obito", "investigacao_cmm",
+    "raca_cor", "idade", "faixa_etaria", "qtd_obitos",
+]
 
-fato_descons = chaves(descons)
-fato_descons["id_causa"] = descons["causabas_categoria"].str.split().str[0].map(m_causa)
-fato_descons["qtd_obitos"] = descons["obitos"]
+conferir_md5()
 
-fato_garbage = chaves(garbage)
-fato_garbage["id_causa"] = garbage["causabas"].map(m_causa)
-fato_garbage["qtd_obitos"] = garbage["obitos"]
+oficiais_bruto = ler("maternos_oficiais")
+descons_bruto = ler("desconsiderados")
+conferir_redundancia(oficiais_bruto)
 
-fato_perfil = chaves(perfil)
-for c in ["est_civil", "escolaridade", "local_ocorrencia_obito", "assistencia_med",
-          "necropsia", "obito_em_idade_fertil", "capitulo_cid10"]:
-    fato_perfil[c] = perfil[c]
+oficiais = tratar(oficiais_bruto, "oficiais")
+# nos oficiais as idades acima de 49 ficam: já foram investigadas e contam no número oficial
+registrar(f"[oficiais] óbitos com 50 anos ou mais (mantidos): "
+          f"{oficiais.loc[oficiais['idade'] >= 50, 'qtd_obitos'].sum()}")
 
-cols_obitos = [c for c in ufs.columns if c.startswith("obitos")]
-fato_uf = ufs.merge(dim_tempo, on="ano")
-fato_uf["id_faixa_etaria"] = fato_uf["faixa_etaria"].map(m_fx)
-fato_uf = fato_uf[["id_tempo", "uf", "regiao", "id_faixa_etaria", "idade"] + cols_obitos]
+descons = tratar(descons_bruto, "desconsiderados")
+# menores de 10 são, na maioria, declarações de bebês marcadas como gestação por engano;
+# acima de 49 sai da idade fértil. A idade ignorada (nula) continua.
+menor_10 = (descons["idade"] < 10).fillna(False)
+maior_49 = (descons["idade"] > 49).fillna(False)
+registrar(f"[desconsiderados] removidos com menos de 10 anos: {descons.loc[menor_10, 'qtd_obitos'].sum()} óbitos")
+registrar(f"[desconsiderados] removidos com 50 anos ou mais: {descons.loc[maior_49, 'qtd_obitos'].sum()} óbitos "
+          f"(idade máxima {descons['idade'].max()})")
+descons = descons[~(menor_10 | maior_49)]
 
-# -------------------------------------------------------------- validações
-for nome, f in [("oficial", fato_oficial), ("descons", fato_descons),
-                ("garbage", fato_garbage), ("perfil", fato_perfil)]:
-    nul = f.filter(like="id_").isna().sum()
-    assert nul.sum() == 0, f"chaves sem correspondência em {nome}:\n{nul[nul > 0]}"
-tot_of = int(fato_oficial.qtd_obitos.sum())
-assert tot_of == len(fato_perfil) == int(fato_uf.obitos_maternos.sum()), "totais de óbitos divergem"
-say(f"[validação] óbitos maternos oficiais = {tot_of} (oficiais = perfil = ufs) -> OK")
-tot_d = int(fato_descons.qtd_obitos.sum())
-assert tot_d == int(fato_uf.filter(like="descons").sum().sum())
-say(f"[validação] óbitos desconsiderados = {tot_d} (bate com a soma das colunas 'descons' do arquivo ufs) -> OK")
-say(f"[qualidade] registros oficiais com idade < 10 anos: {int((oficiais['idade'] < 10).sum())} "
-    f"(mantidos; ficam na faixa '0 a 9')")
-say(f"[qualidade] municípios 'ignorados': {int(dim_localidade.municipio_ignorado.sum())} (um por UF, mantidos)")
-
-# ------------------------------------------------------------------ saída
+colunas_descons = [c for c in COLUNAS if c not in ("cod_causa", "tipo_morte_materna")]
 saidas = {
-    "dim_tempo": dim_tempo, "dim_localidade": dim_localidade, "dim_faixa_etaria": dim_faixa,
-    "dim_raca_cor": dim_raca_cor, "dim_tipo_morte": dim_tipo_morte, "dim_periodo_obito": dim_periodo,
-    "dim_investigacao_cmm": dim_investigacao, "dim_causa_cid10": dim_causa,
-    "fato_obito_materno": fato_oficial, "fato_obito_desconsiderado": fato_descons,
-    "fato_garbage_code": fato_garbage, "fato_perfil_obito": fato_perfil, "fato_obitos_uf_idade": fato_uf,
+    "obitos_maternos_oficiais_tratado_2014_2024.csv": oficiais[COLUNAS],
+    "obitos_desconsiderados_tratado_2014_2024.csv": descons[colunas_descons],
 }
-for nome, df in saidas.items():
-    df.to_csv(OUT / f"{nome}.csv", index=False)
-    say(f"[saída] {nome}.csv: {len(df)} linhas x {df.shape[1]} colunas")
+
+OUT.mkdir(parents=True, exist_ok=True)
+for nome_arquivo, df in saidas.items():
+    caminho = OUT / nome_arquivo
+    df.to_csv(caminho, index=False, encoding="utf-8")
+    registrar(f"{nome_arquivo}: {len(df)} linhas, {df['qtd_obitos'].sum()} óbitos, "
+              f"{df.shape[1]} colunas, {caminho.stat().st_size / 1e6:.1f} MB")
 
 Path("docs").mkdir(exist_ok=True)
-Path("docs/log_etl.txt").write_text("\n".join(log), encoding="utf-8")
+Path("docs/log_etl.txt").write_text("\n".join(log) + "\n", encoding="utf-8")
