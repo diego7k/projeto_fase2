@@ -1,0 +1,7 @@
+# Copie para terraform.tfvars e preencha. O terraform.tfvars não vai para o Git.
+# Nenhum valor aqui é segredo: o token do Aiven vai na variável de ambiente AIVEN_TOKEN.
+
+cloud_name = "do-nyc" # confira em Aiven > serviço > Overview > Cloud
+# plan       = "free-1-1gb"
+# aiven_project = "diego7k"
+# service_name  = "pg-3f45094b"

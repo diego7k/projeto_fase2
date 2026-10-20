@@ -1,0 +1,17 @@
+# Credenciais: nunca versionar
+.env
+.env.*
+!.env.example
+
+# Terraform: o state e o tfvars podem conter senhas e dados da conta
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
+*.tfplan
+
+__pycache__/
+.DS_Store
