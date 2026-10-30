@@ -1,21 +1,12 @@
-"""
-Carga no PostgreSQL (Aiven): cria as tabelas com sql/schema.sql e carrega os dois CSVs tratados.
-
-Precisa de um .env (que não vai para o GitHub) com:
-    DATABASE_URL=postgres://USUARIO:SENHA@HOST:PORTA/defaultdb?sslmode=require
-
-Rodar a partir da pasta projeto/:  python src/load.py
-"""
+# Carga dos CSVs tratados no PostgreSQL. A conexão vem do DATABASE_URL no .env.
+# Rodar de dentro de projeto/: python src/load.py
 import os
 from pathlib import Path
 
 import psycopg2
+from dotenv import load_dotenv
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
+load_dotenv()
 
 PROC = Path("data/processed")
 TABELAS = {

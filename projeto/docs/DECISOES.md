@@ -1,94 +1,53 @@
-Decisões técnicas - Fase 2
+# Decisões de tratamento
 
-Este arquivo resume as principais decisões tomadas no tratamento dos dados. O código está em src/etl.py e as contagens geradas pelo processo ficam em docs/log_etl.txt.
+Resumo do que está no documento da entrega. O código de cada passo está em `src/etl.py` e as contagens saem em `docs/log_etl.txt`.
 
-Origem dos dados
+## Origem
 
-Os dados vêm do Observatório Obstétrico Brasileiro (OOBr), baixados do Synapse.
+Observatório Obstétrico Brasileiro (OOBr), baixado do Synapse (pasta `syn42902915`). Os cinco arquivos estão na versão 4 (atualização de fevereiro de 2025). O `etl.py` confere o MD5 de cada um com o `manifest.csv` antes de começar.
 
-Foram usados os cinco arquivos originais da base de óbitos na gravidez e no puerpério, no período de 1996 a 2024:
+| Arquivo | Linhas | Colunas | Tamanho | Usado? |
+|---|---|---|---|---|
+| maternos_oficiais | 48.785 | 15 | 11,3 MB | sim |
+| desconsiderados | 42.178 | 13 | 9,7 MB | sim |
+| analise_cruzada | 48.933 | 18 | 10,8 MB | não, repete os óbitos oficiais com uma linha por óbito |
+| ufs | 23.468 | 13 | 1,0 MB | não, a soma de óbitos é igual à dos oficiais (48.933) |
+| garbage_codes | 1.554 | 15 | 0,35 MB | não, todas as linhas já estão nos oficiais |
 
-- maternos_oficiais
-- desconsiderados
-- garbage_codes
-- analise_cruzada
-- ufs
+## Recorte
 
-O arquivo manifest.csv foi mantido junto com os dados brutos para registrar a origem, versão e identificação dos arquivos.
+Só 2014 a 2024. Dez anos dão para ver a tendência, incluindo a pandemia (2020 e 2021), e os anos mais antigos têm declarações de óbito pior preenchidas. Também ajuda a ficar bem abaixo do limite de 1 GB do Aiven.
 
-Escopo
+## O que foi feito
 
-O foco desta fase é mortalidade materna.
+1. Coluna `X` removida. É o número da linha na exportação e vem "NA" em 2023 e 2024.
+2. `causabas_categoria` separada em `cod_categoria` (O15) e `categoria_descricao` (Eclâmpsia).
+3. Idade 99 virou nula (idade não informada no SIM). São 1 caso nos oficiais e 13 nos desconsiderados. O óbito continua na base.
+4. Nos desconsiderados ficaram só as idades de 10 a 49 anos. Saíram 881 óbitos com menos de 10 anos (quase todos com idade 0 e causas de recém-nascido, provavelmente declarações de bebês marcadas como gestação por engano) e 1.763 com 50 anos ou mais (a mais velha tinha 65).
+5. Nos oficiais as 21 mortes com 50 anos ou mais foram mantidas, porque já foram investigadas e classificadas como maternas. Tirar mudaria o total oficial.
+6. Faixa etária de 5 em 5 anos (10 a 14 até 45 a 49), mais "50 ou mais" e "Ignorada". A idade exata continua na coluna `idade`.
+7. 2024 marcado com `preliminar = true` (só 745 óbitos oficiais, menos da metade dos outros anos).
+8. "Ignorado" e "Sem informação" foram mantidos como categoria. Nos oficiais: 5.342 óbitos sem informação na investigação do comitê, 1.350 sem período do óbito e 432 com raça/cor ignorada.
+9. Espaços extras retirados dos textos (ex.: "III - Doenças  do sangue" vinha com dois espaços).
+10. Município identificado pelo código IBGE de 6 dígitos, guardado como texto. Os registros de "município ignorado" (2 nos oficiais e 13 nos desconsiderados) continuam e contam no total do estado.
+11. Colunas com o mesmo significado têm o mesmo nome nos dois arquivos (`cod_municipio`, `raca_cor`, `periodo_obito`, `qtd_obitos`).
+12. Não há linhas duplicadas em nenhum dos dois arquivos. Cada linha já traz a quantidade de óbitos, então não foi preciso agrupar nem fazer amostragem.
 
-Violência obstétrica não foi incluída porque os arquivos usados não trazem dados específicos sobre esse tema.
+## Números em cada etapa
 
-A razão de mortalidade materna também não foi calculada nesta fase, porque ela precisa dos dados de nascidos vivos do SINASC.
+| Etapa | Oficiais: linhas | Oficiais: óbitos | Desconsiderados: linhas | Desconsiderados: óbitos |
+|---|---|---|---|---|
+| Original (1996–2024) | 48.785 | 48.933 | 42.178 | 42.311 |
+| Após recorte 2014–2024 | 18.457 | 18.534 | 12.901 | 12.967 |
+| Após tratamento | 18.457 | 18.534 | 10.270 | 10.323 |
 
-Tratamentos realizados
+Os dois CSVs tratados somam 6,6 MB (4,2 MB + 2,4 MB), contra 21 MB dos dois originais.
 
-A coluna X foi removida porque era apenas um índice da exportação original.
+## Diferenças em relação à primeira entrega
 
-Textos foram limpos com remoção de espaços extras.
+- Não existe data do óbito, só o ano. A coluna `ano` é inteira.
+- Os arquivos não têm nascidos vivos, então a razão de mortalidade materna vai depender do SINASC, que ainda vai entrar no trabalho.
 
-Ano e idade foram convertidos para número inteiro.
+## Banco
 
-O código do município foi mantido com 6 dígitos para não perder zeros à esquerda.
-
-Foi criada uma faixa etária a partir da idade.
-
-Estados civis com variações de gênero foram unificados, como Solteira e Solteiro.
-
-Um valor nulo de necropsia foi preenchido como Ignorado.
-
-Municípios ignorados foram mantidos e sinalizados com a coluna municipio_ignorado.
-
-Registros com idade menor que 10 anos foram mantidos, mas ficaram na faixa 0 a 9.
-
-As linhas repetidas do arquivo analise_cruzada foram mantidas, porque cada linha representa um óbito e o total bate com os outros arquivos.
-
-Alguns nomes de colunas do arquivo ufs foram encurtados para evitar problemas no PostgreSQL.
-
-Modelagem
-
-A base foi organizada em modelo estrela, com dimensões e tabelas fato.
-
-Foram criadas 8 dimensões:
-
-- tempo
-- localidade
-- faixa etária
-- raça/cor
-- tipo de morte
-- período do óbito
-- investigação CMM
-- causa CID-10
-
-Foram criadas 5 tabelas fato:
-
-- óbitos maternos oficiais
-- óbitos desconsiderados
-- garbage codes
-- perfil do óbito
-- óbitos por UF e idade
-
-Validações
-
-O total de óbitos maternos oficiais ficou em 48.933.
-
-Esse total bate nos arquivos maternos_oficiais, analise_cruzada e ufs.
-
-O total de óbitos desconsiderados ficou em 42.311.
-
-Esse total bate com a soma das colunas de desconsiderados do arquivo ufs.
-
-Nenhuma chave estrangeira ficou sem correspondência.
-
-Banco de dados
-
-O banco usado é PostgreSQL no Aiven.
-
-O schema se chama painel.
-
-O arquivo sql/schema.sql cria as tabelas, índices e a view principal.
-
-O arquivo src/load.py carrega os CSVs tratados para o banco usando COPY.
+PostgreSQL no Aiven, schema `painel`, com duas tabelas (`obitos_maternos_oficiais` e `obitos_desconsiderados`) que seguem as colunas dos CSVs. A carga é feita com `COPY` pelo `src/load.py`.

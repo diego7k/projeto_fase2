@@ -1,12 +1,5 @@
-"""
-Tratamento dos óbitos maternos oficiais e dos óbitos desconsiderados (OOBr), 2014 a 2024.
-
-Lê os arquivos originais em data/raw e grava em data/processed:
-    obitos_maternos_oficiais_tratado_2014_2024.csv
-    obitos_desconsiderados_tratado_2014_2024.csv
-
-Rodar a partir da pasta projeto/:  python src/etl.py
-"""
+# Tratamento dos óbitos maternos oficiais e desconsiderados do OOBr (2014 a 2024).
+# Rodar de dentro de projeto/: python src/etl.py
 import hashlib
 from pathlib import Path
 
@@ -15,7 +8,7 @@ import pandas as pd
 RAW = Path("data/raw")
 OUT = Path("data/processed")
 ANO_INICIO, ANO_FIM = 2014, 2024
-ANO_PRELIMINAR = 2024  # arquivos atualizados em fev/2025, 2024 ainda está incompleto
+ANO_PRELIMINAR = 2024  # dados de 2024 ainda incompletos (versão de fev/2025)
 
 log = []
 
@@ -30,7 +23,6 @@ def arquivo(nome):
 
 
 def conferir_md5():
-    # garante que estamos usando a mesma versão listada no manifest.csv
     manifest = pd.read_csv(RAW / "manifest.csv")
     for _, linha in manifest.iterrows():
         md5 = hashlib.md5((RAW / linha["name"]).read_bytes()).hexdigest()
@@ -39,7 +31,7 @@ def conferir_md5():
 
 
 def conferir_redundancia(oficiais):
-    # motivo de deixar ufs e garbage_codes de fora (ver seção 1.3 do documento)
+    # ufs e garbage_codes ficaram de fora porque repetem os oficiais
     ufs = pd.read_csv(arquivo("ufs"))
     registrar(f"soma de obitos_maternos no arquivo ufs: {ufs['obitos_maternos'].sum()} "
               f"(oficiais: {oficiais['obitos'].sum()})")
@@ -72,20 +64,19 @@ def tratar(df, nome):
     df = df[df["ano"].between(ANO_INICIO, ANO_FIM)].copy()
     registrar(f"[{nome}] recorte {ANO_INICIO}-{ANO_FIM}: {len(df)} linhas, {df['obitos'].sum()} óbitos")
 
-    # X é só o número da linha na exportação (e vem NA em 2023 e 2024)
+    # X é só o número da linha na exportação
     df = df.drop(columns="X")
 
-    # tira espaços nas pontas e espaços duplicados ("III - Doenças  do sangue")
     for col in df.columns:
         if pd.api.types.is_string_dtype(df[col]):
             df[col] = df[col].str.strip().str.replace(r"\s+", " ", regex=True)
 
-    # "O15 Eclâmpsia" -> cod_categoria = O15, categoria_descricao = Eclâmpsia
+    # "O15 Eclâmpsia" -> O15 / Eclâmpsia
     partes = df["causabas_categoria"].str.split(" ", n=1)
     df["cod_categoria"] = partes.str[0]
     df["categoria_descricao"] = partes.str[1]
 
-    # 99 = idade não informada no SIM
+    # 99 = idade ignorada no SIM
     registrar(f"[{nome}] idade 99 passou a nula: {(df['idade'] == 99).sum()}")
     df["idade"] = df["idade"].astype("Int64").mask(df["idade"] == 99)
 
@@ -124,13 +115,12 @@ descons_bruto = ler("desconsiderados")
 conferir_redundancia(oficiais_bruto)
 
 oficiais = tratar(oficiais_bruto, "oficiais")
-# nos oficiais as idades acima de 49 ficam: já foram investigadas e contam no número oficial
+# nos oficiais as idades acima de 49 ficam, porque contam no número oficial
 registrar(f"[oficiais] óbitos com 50 anos ou mais (mantidos): "
           f"{oficiais.loc[oficiais['idade'] >= 50, 'qtd_obitos'].sum()}")
 
 descons = tratar(descons_bruto, "desconsiderados")
-# menores de 10 são, na maioria, declarações de bebês marcadas como gestação por engano;
-# acima de 49 sai da idade fértil. A idade ignorada (nula) continua.
+# menores de 10 são quase sempre bebês marcados como gestação por engano
 menor_10 = (descons["idade"] < 10).fillna(False)
 maior_49 = (descons["idade"] > 49).fillna(False)
 registrar(f"[desconsiderados] removidos com menos de 10 anos: {descons.loc[menor_10, 'qtd_obitos'].sum()} óbitos")

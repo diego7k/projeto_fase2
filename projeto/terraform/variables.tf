@@ -1,28 +1,28 @@
 variable "aiven_project" {
-  description = "Nome do projeto no Aiven onde o banco fica"
+  description = "Projeto no Aiven"
   type        = string
   default     = "diego7k"
 }
 
 variable "service_name" {
-  description = "Nome do serviço PostgreSQL no Aiven (não pode ser alterado depois de criado)"
+  description = "Nome do serviço PostgreSQL"
   type        = string
   default     = "pg-3f45094b"
 }
 
 variable "cloud_name" {
-  description = "Nuvem e região do serviço, como aparece no console do Aiven (ex.: do-nyc, aws-us-east-1)"
+  description = "Nuvem e região, ex.: do-nyc"
   type        = string
 }
 
 variable "plan" {
-  description = "Plano do serviço. free-1-1gb é o plano gratuito (1 CPU, 1 GB de RAM, 1 GB de disco)"
+  description = "Plano do serviço (free-1-1gb é o gratuito)"
   type        = string
   default     = "free-1-1gb"
 }
 
 variable "usuario_leitura" {
-  description = "Usuário somente leitura que o painel vai usar nas próximas fases"
+  description = "Usuário somente leitura do painel"
   type        = string
   default     = "painel_leitura"
 }

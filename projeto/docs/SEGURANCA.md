@@ -34,10 +34,11 @@ Na primeira versão do repositório, o `.env` com a senha do `avnadmin` foi envi
 O que foi feito:
 
 - a senha do `avnadmin` foi trocada no console do Aiven (Users > avnadmin > Reset password), então a senha que aparece no histórico não funciona mais;
-- o `.env` foi removido do repositório (`git rm --cached .env`) e foi criado um `.gitignore` na raiz, que vale para o repositório inteiro;
+- o `.env` foi removido do repositório e foi criado um `.gitignore` na raiz, que vale para o repositório inteiro;
+- o histórico do Git foi reescrito para tirar o `.env` de todos os commits (`git filter-branch --index-filter 'git rm --cached --ignore-unmatch .env'`), então o arquivo não aparece mais em nenhuma versão do repositório;
 - o `.env` passou a ser gerado pelo `terraform output`, em vez de copiado à mão.
 
-Trocar a senha é o passo que realmente resolve: mesmo apagando o arquivo, ele continua nos commits antigos e pode já ter sido copiado.
+Limpar o histórico não basta sozinho, porque alguém pode ter clonado o repositório antes. Por isso a troca da senha é o passo principal, e a limpeza do histórico complementa.
 
 ## Como trocar uma senha
 

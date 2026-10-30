@@ -1,14 +1,13 @@
 SET search_path TO painel;
 
--- 1) Linhas e óbitos por tabela
--- esperado: oficiais 18457 linhas / 18534 óbitos; desconsiderados 10270 linhas / 10323 óbitos
+-- 1) Linhas e óbitos por tabela. Esperado: oficiais 18457 linhas / 18534 óbitos; desconsiderados 10270 linhas / 10323 óbitos
 SELECT 'obitos_maternos_oficiais' AS tabela, COUNT(*) AS linhas, SUM(qtd_obitos) AS obitos
 FROM obitos_maternos_oficiais
 UNION ALL
 SELECT 'obitos_desconsiderados', COUNT(*), SUM(qtd_obitos)
 FROM obitos_desconsiderados;
 
--- 2) Tamanho das tabelas e do banco (limite de 1 GB no plano gratuito do Aiven)
+-- 2) Tamanho das tabelas e do banco
 SELECT relname AS tabela, pg_size_pretty(pg_total_relation_size(relid)) AS tamanho
 FROM pg_stat_user_tables WHERE schemaname = 'painel'
 ORDER BY pg_total_relation_size(relid) DESC;
@@ -20,7 +19,7 @@ SELECT table_name, column_name, data_type, character_maximum_length, is_nullable
 FROM information_schema.columns WHERE table_schema = 'painel'
 ORDER BY table_name, ordinal_position;
 
--- 4) Óbitos por ano nos dois conjuntos (2024 marcado como preliminar)
+-- 4) Óbitos por ano
 SELECT COALESCE(o.ano, d.ano) AS ano, o.obitos AS oficiais, d.obitos AS desconsiderados,
        COALESCE(o.preliminar, d.preliminar) AS preliminar
 FROM (SELECT ano, preliminar, SUM(qtd_obitos) AS obitos FROM obitos_maternos_oficiais GROUP BY ano, preliminar) o
@@ -34,7 +33,7 @@ FROM obitos_maternos_oficiais
 GROUP BY regiao, faixa_etaria
 ORDER BY regiao, faixa_etaria;
 
--- 6) Quanto falta de informação (qualidade do registro)
+-- 6) Registros sem informação
 SELECT 'investigação CMM sem informação' AS item, SUM(qtd_obitos) AS obitos
 FROM obitos_maternos_oficiais WHERE investigacao_cmm = 'Sem informação'
 UNION ALL
